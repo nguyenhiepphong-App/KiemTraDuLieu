@@ -2,62 +2,64 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="Trợ lý giáo vụ", layout="wide")
-st.title("🛡️ Kiểm tra bất thường: Dữ liệu & Xét lên lớp")
+st.title("🛡️ Kiểm tra: Sót dữ liệu & Xét lên lớp")
 
-uploaded_file = st.file_uploader("Tải file Excel kết quả học tập", type=["xlsx"])
+uploaded_file = st.file_uploader("Tải file Excel", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
     
-    # Loại trừ các cột không phải môn học
-    info_cols = ["Mã lớp", "Họ tên", "Được lên lớp", "Danh hiệu cả năm"]
-    all_cols = [c for c in df.columns if c not in info_cols]
+    # Các cột không phải môn học
+    info_cols = ["Mã lớp", "Họ tên", "Được lên lớp", "Danh hiệu cả năm", "Tổng số ngày nghỉ"]
+    all_subjects = [c for c in df.columns if c not in info_cols]
+    cols_nhan_xet = ["Hoạt động trải nghiệm", "Giáo dục thể chất"]
     
     bao_cao = []
     
-    # Duyệt qua từng lớp
     for lop, group in df.groupby("Mã lớp"):
         for idx, row in group.iterrows():
             ly_do_bat_thuong = []
             
-            # --- 1. KIỂM TRA THIẾU DỮ LIỆU (So sánh ngang hàng trong lớp) ---
-            for col in all_cols:
-                # Nếu quá 50% lớp có dữ liệu mà hs này trống -> Thiếu dữ liệu
+            # 1. Kiểm tra thiếu dữ liệu
+            for col in all_subjects:
                 if group[col].notna().sum() > len(group) * 0.5 and pd.isna(row.get(col)):
-                    ly_do_bat_thuong.append(f"Thiếu dữ liệu môn {col}")
+                    ly_do_bat_thuong.append(f"Thiếu {col}")
             
-            # --- 2. XÉT LÊN LỚP (Đối soát Thông tư 22) ---
-            # Chỉ xét nếu học sinh không có dấu "x"
+            # 2. Xét lên lớp (Thông tư 22)
             co_tick = str(row.get("Được lên lớp", "")).strip().upper() == 'X'
             
             if not co_tick:
-                vi_pham_tt22 = []
-                for col in all_cols:
+                vi_pham = []
+                nghi_hoc = row.get("Tổng số ngày nghỉ", 0)
+                if pd.notna(nghi_hoc) and isinstance(nghi_hoc, (int, float)) and nghi_hoc > 45:
+                    vi_pham.append(f"Nghỉ quá 45 buổi ({nghi_hoc})")
+                
+                for col in all_subjects:
                     val = row.get(col)
                     if pd.notna(val):
-                        # Môn điểm số (< 5.0)
-                        if isinstance(val, (int, float)) and val < 5.0:
-                            vi_pham_tt22.append(f"{col}({val})<5.0")
-                        # Môn nhận xét (Chưa đạt)
-                        elif str(val).strip().upper() == 'CĐ':
-                            vi_pham_tt22.append(f"{col}:CĐ")
+                        if col not in cols_nhan_xet and isinstance(val, (int, float)) and val < 5.0:
+                            vi_pham.append(f"{col}({val})<5.0")
+                        elif col in cols_nhan_xet and str(val).strip().upper() == 'CĐ':
+                            vi_pham.append(f"{col}:CĐ")
                 
-                if vi_pham_tt22:
-                    ly_do_bat_thuong.append(f"Lý do chưa lên lớp: {', '.join(vi_pham_tt22)}")
+                if vi_pham:
+                    ly_do_bat_thuong.append(f"Lý do chưa đạt: {', '.join(vi_pham)}")
                 else:
-                    ly_do_bat_thuong.append("Đủ điều kiện nhưng chưa có dấu X")
+                    ly_do_bat_thuong.append("Đủ điều kiện nhưng thiếu dấu X")
 
-            # Ghi lại nếu có bất thường
             if ly_do_bat_thuong:
-                bao_cao.append({
-                    "Lớp": lop,
-                    "Họ tên": row.get("Họ tên"),
-                    "Bất thường": "; ".join(ly_do_bat_thuong)
-                })
+                bao_cao.append({"Lớp": lop, "Họ tên": row.get("Họ tên"), "Bất thường": "; ".join(ly_do_bat_thuong)})
 
-    # Hiển thị kết quả
     if bao_cao:
-        st.warning(f"Phát hiện {len(bao_cao)} trường hợp bất thường:")
-        st.table(pd.DataFrame(bao_cao))
+        df_report = pd.DataFrame(bao_cao)
+        st.table(df_report)
+        
+        # Nút tải file
+        csv = df_report.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Tải danh sách lỗi (.csv)", data=csv, file_name="danh_sach_loi.csv", mime="text/csv")
     else:
-        st.success("✅ Dữ liệu lớp đồng nhất và kết quả lên lớp hợp lệ!")
+        st.success("✅ Dữ liệu hoàn hảo!")
+
+# Thông tin cuối giao diện
+st.markdown("---")
+st.markdown("Người thực hiện: **Nguyen Hiep Phong - THPT Bến Tre**")
