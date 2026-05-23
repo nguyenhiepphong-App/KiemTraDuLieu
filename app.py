@@ -1,40 +1,63 @@
 import streamlit as st
 import pandas as pd
 
-st.title("🛡️ Kiểm tra lý do không đủ điều kiện lên lớp")
-uploaded_file = st.file_uploader("Tải file Excel", type=["xlsx"])
+st.set_page_config(page_title="Trợ lý giáo vụ", layout="wide")
+st.title("🛡️ Kiểm tra bất thường: Dữ liệu & Xét lên lớp")
+
+uploaded_file = st.file_uploader("Tải file Excel kết quả học tập", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
-    all_subjects = ["Toán", "Vật lí", "Hóa học", "Sinh học", "Tin học", "Ngữ Văn", "Lịch sử", "Địa lí", "Ngoại ngữ 1", "Công nghệ", "GDQP-AN", "Ngoại ngữ 2", "Toán Pháp", "Hoạt động trải nghiệm", "Giáo dục thể chất"]
-    cols_nhan_xet = ["Hoạt động trải nghiệm", "Giáo dục thể chất"]
+    
+    # Loại trừ các cột không phải môn học
+    info_cols = ["Mã lớp", "Họ tên", "Được lên lớp", "Danh hiệu cả năm"]
+    all_cols = [c for c in df.columns if c not in info_cols]
     
     bao_cao = []
     
-    for idx, row in df.iterrows():
-        # Kiểm tra tiêu chuẩn Thông tư 22
-        ly_do_truot = []
-        
-        # 1. Kiểm tra điểm môn học
-        for col in all_subjects:
-            if col in df.columns and pd.notna(row.get(col)):
-                val = row.get(col)
-                if col not in cols_nhan_xet and isinstance(val, (int, float)) and val < 5.0:
-                    ly_do_truot.append(f"{col}<5.0")
-                if col in cols_nhan_xet and str(val).strip().upper() == 'CĐ':
-                    ly_do_truot.append(f"{col}:CĐ")
-        
-        # Kiểm tra xem có dấu X không
-        co_tick = str(row.get("Được lên lớp", "")).strip().upper() == 'X'
-        
-        # CHỈ GHI NHẬN KHI: Đã đủ dữ liệu (không thiếu môn) MÀ VẪN KHÔNG LÊN LỚP
-        # Hoặc: Đã tích X nhưng thực tế lại vi phạm
-        if ly_do_truot and co_tick:
-            bao_cao.append({"Họ tên": row.get("Họ tên"), "Lý do không đạt": ", ".join(ly_do_truot), "Tình trạng": "Cần xóa X"})
-        elif ly_do_truot and not co_tick:
-            bao_cao.append({"Họ tên": row.get("Họ tên"), "Lý do không đạt": ", ".join(ly_do_truot), "Tình trạng": "Chính xác (Không lên lớp)"})
+    # Duyệt qua từng lớp
+    for lop, group in df.groupby("Mã lớp"):
+        for idx, row in group.iterrows():
+            ly_do_bat_thuong = []
+            
+            # --- 1. KIỂM TRA THIẾU DỮ LIỆU (So sánh ngang hàng trong lớp) ---
+            for col in all_cols:
+                # Nếu quá 50% lớp có dữ liệu mà hs này trống -> Thiếu dữ liệu
+                if group[col].notna().sum() > len(group) * 0.5 and pd.isna(row.get(col)):
+                    ly_do_bat_thuong.append(f"Thiếu dữ liệu môn {col}")
+            
+            # --- 2. XÉT LÊN LỚP (Đối soát Thông tư 22) ---
+            # Chỉ xét nếu học sinh không có dấu "x"
+            co_tick = str(row.get("Được lên lớp", "")).strip().upper() == 'X'
+            
+            if not co_tick:
+                vi_pham_tt22 = []
+                for col in all_cols:
+                    val = row.get(col)
+                    if pd.notna(val):
+                        # Môn điểm số (< 5.0)
+                        if isinstance(val, (int, float)) and val < 5.0:
+                            vi_pham_tt22.append(f"{col}({val})<5.0")
+                        # Môn nhận xét (Chưa đạt)
+                        elif str(val).strip().upper() == 'CĐ':
+                            vi_pham_tt22.append(f"{col}:CĐ")
+                
+                if vi_pham_tt22:
+                    ly_do_bat_thuong.append(f"Lý do chưa lên lớp: {', '.join(vi_pham_tt22)}")
+                else:
+                    ly_do_bat_thuong.append("Đủ điều kiện nhưng chưa có dấu X")
 
+            # Ghi lại nếu có bất thường
+            if ly_do_bat_thuong:
+                bao_cao.append({
+                    "Lớp": lop,
+                    "Họ tên": row.get("Họ tên"),
+                    "Bất thường": "; ".join(ly_do_bat_thuong)
+                })
+
+    # Hiển thị kết quả
     if bao_cao:
+        st.warning(f"Phát hiện {len(bao_cao)} trường hợp bất thường:")
         st.table(pd.DataFrame(bao_cao))
     else:
-        st.success("✅ Không phát hiện học sinh nào vi phạm tiêu chuẩn Thông tư 22.")
+        st.success("✅ Dữ liệu lớp đồng nhất và kết quả lên lớp hợp lệ!")
